@@ -4,6 +4,11 @@ from config import *
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    """Página principal"""
+    return jsonify({'mensaje': '🤖 Robot de Apuestas funcionando!'})
+
 @app.route('/health')
 def health():
     """Para verificar que funciona"""
