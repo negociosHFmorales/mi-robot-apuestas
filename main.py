@@ -23,7 +23,8 @@ def home():
             '/historial': 'Ver últimas apuestas analizadas', 
             '/estadisticas': 'Ver estadísticas del robot',
             '/analizar': 'Ejecutar análisis manual',
-            '/reset': 'Limpiar historial'
+            '/reset': 'Limpiar historial',
+            '/test-telegram': 'Probar envío a Telegram'
         }
     })
 
@@ -35,7 +36,9 @@ def health():
         'servidor': 'Render.com',
         'hora_servidor': datetime.now().isoformat(),
         'memoria_disponible': 'OK',
-        'apis_conectadas': 'OK'
+        'apis_conectadas': 'OK',
+        'telegram_token': '✅ Configurado' if os.getenv('TELEGRAM_TOKEN') else '❌ NO configurado',
+        'telegram_chat': '✅ Configurado' if os.getenv('TELEGRAM_CHAT') else '❌ NO configurado'
     })
 
 @app.route('/webhook', methods=['POST'])
@@ -43,6 +46,7 @@ def webhook():
     """Recibe y guarda datos de análisis desde N8N"""
     try:
         datos = request.get_json()
+        print(f"📥 Datos recibidos: {datos}")  # Debug log
         
         # Crear registro completo
         registro = {
@@ -60,6 +64,8 @@ def webhook():
             'casa': datos.get('casa', 'N/A'),
             'origen': 'N8N_Robot'
         }
+        
+        print(f"📋 Registro creado: {registro}")  # Debug log
         
         # Cargar historial existente
         try:
@@ -80,15 +86,15 @@ def webhook():
         with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
             json.dump(historial, f, indent=2, ensure_ascii=False)
         
-        # Opcional: Notificar a Telegram si hay valor
-        if datos.get('valor') == 'SÍ' and os.getenv('TELEGRAM_TOKEN'):
-            notificar_telegram_valor(registro)
+        # SIEMPRE enviar a Telegram (para debug)
+        telegram_resultado = notificar_telegram_siempre(registro)
         
         return jsonify({
             'status': '✅ GUARDADO EXITOSAMENTE',
             'registro_id': registro['id'],
             'partido': registro['partido'],
             'total_historial': len(historial),
+            'telegram_enviado': telegram_resultado,
             'mensaje': 'Análisis guardado en Render'
         })
         
@@ -191,9 +197,9 @@ def analizar_manual():
                 'text': f"🔄 {mensaje}\n\n✅ Robot funcionando desde Render\n🔗 Sistema conectado correctamente"
             }
             response = requests.post(url, json=data, timeout=10)
-            telegram_status = "✅ Enviado" if response.status_code == 200 else "⚠️ Error"
-        except:
-            telegram_status = "❌ No configurado"
+            telegram_status = "✅ Enviado" if response.status_code == 200 else f"⚠️ Error: {response.status_code}"
+        except Exception as e:
+            telegram_status = f"❌ Error: {str(e)}"
     else:
         telegram_status = "⚙️ Telegram no configurado"
     
@@ -222,6 +228,87 @@ def reset_historial():
             'mensaje': f'Error limpiando historial: {str(e)}'
         }), 500
 
+@app.route('/test-telegram')
+def test_telegram():
+    """Probar envío directo a Telegram"""
+    try:
+        token = os.getenv('TELEGRAM_TOKEN')
+        chat = os.getenv('TELEGRAM_CHAT')
+        
+        if not token:
+            return jsonify({'error': '❌ TELEGRAM_TOKEN no configurado'})
+        
+        if not chat:
+            return jsonify({'error': '❌ TELEGRAM_CHAT no configurado'})
+        
+        # Crear mensaje de prueba
+        registro_prueba = {
+            'partido': 'PRUEBA SISTEMA vs FUNCIONANDO',
+            'liga': 'Test League',
+            'fecha_analisis': datetime.now().strftime('%d/%m/%Y %H:%M'),
+            'recomendacion': '✅ Sistema operativo',
+            'confianza': '100%',
+            'apostar': '0%',
+            'valor': 'FUNCIONANDO'
+        }
+        
+        resultado = notificar_telegram_siempre(registro_prueba)
+        
+        return jsonify({
+            'status': '🧪 PRUEBA TELEGRAM',
+            'resultado': resultado,
+            'token_configurado': '✅ Sí',
+            'chat_configurado': '✅ Sí'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'❌ Error en prueba: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+def notificar_telegram_siempre(registro):
+    """Enviar SIEMPRE a Telegram (para debug y pruebas)"""
+    try:
+        token = os.getenv('TELEGRAM_TOKEN')
+        chat = os.getenv('TELEGRAM_CHAT')
+        
+        if not token or not chat:
+            return "❌ Token o Chat no configurados"
+        
+        # Crear mensaje formateado
+        mensaje = f"""🎯 ANÁLISIS COMPLETADO 🎯
+
+🏀 {registro.get('partido', 'Sin datos')}
+🏆 Liga: {registro.get('liga', 'N/A')}
+📅 Análisis: {registro.get('fecha_analisis', 'N/A')}
+
+💡 Recomendación: {registro.get('recomendacion', 'N/A')}
+📊 Confianza: {registro.get('confianza', '0%')}
+💰 Apostar: {registro.get('apostar', '0%')} del bankroll
+✅ Valor: {registro.get('valor', 'NO')}
+
+🤖 Robot funcionando desde Render
+⏰ {datetime.now().strftime('%H:%M:%S')}"""
+
+        # Enviar mensaje
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = {
+            'chat_id': chat,
+            'text': mensaje,
+            'parse_mode': 'HTML'
+        }
+        
+        response = requests.post(url, json=data, timeout=10)
+        
+        if response.status_code == 200:
+            return "✅ Mensaje enviado correctamente"
+        else:
+            return f"⚠️ Error HTTP: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return f"❌ Error enviando: {str(e)}"
+
 def notificar_telegram_valor(registro):
     """Enviar notificación especial cuando hay valor alto"""
     try:
@@ -229,6 +316,38 @@ def notificar_telegram_valor(registro):
         chat = os.getenv('TELEGRAM_CHAT') 
         
         if not token or not chat:
-            return
+            return "❌ Telegram no configurado"
             
-        mensaje = f"🚨 VALOR ALTO DETECTADO 🚨\n\n"
+        mensaje = f"""🚨 VALOR ALTO DETECTADO 🚨
+
+🎰 {registro.get('partido', 'Sin datos')}
+🏆 {registro.get('liga', 'N/A')}
+📅 {registro.get('fecha_analisis', 'N/A')}
+
+💰 CUOTAS:
+{registro.get('cuotas', {})}
+
+📊 PROBABILIDADES:
+{registro.get('probabilidades', {})}
+
+🎯 RECOMENDACIÓN: {registro.get('recomendacion', 'N/A')}
+🔥 CONFIANZA: {registro.get('confianza', '0%')}
+💎 APOSTAR: {registro.get('apostar', '0%')} del bankroll
+
+⚠️ ¡Revisar inmediatamente!
+🏪 Casa: {registro.get('casa', 'N/A')}"""
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = {
+            'chat_id': chat,
+            'text': mensaje
+        }
+        
+        response = requests.post(url, json=data, timeout=10)
+        return "✅ Alerta de valor enviada" if response.status_code == 200 else f"Error: {response.status_code}"
+        
+    except Exception as e:
+        return f"❌ Error en notificación: {str(e)}"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
