@@ -229,15 +229,6 @@ def get_nba():
             return jsonify({'error': 'API key no configurada'}), 400
             
         url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
-
-@app.route('/mlb')
-def get_mlb():
-    """Obtener cuotas MLB (Béisbol) - ACTIVO EN AGOSTO"""
-    try:
-        if not ODDS_API_KEY:
-            return jsonify({'error': 'API key no configurada'}), 400
-            
-        url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
         params = {
             'apiKey': ODDS_API_KEY,
             'regions': 'us',
@@ -250,11 +241,12 @@ def get_mlb():
             games = response.json()
             
             if not games:
-                mensaje = "❌ No hay juegos NBA disponibles en este momento"
+                mensaje = "❌ No hay juegos NBA disponibles en este momento (Fuera de temporada)"
                 if TELEGRAM_TOKEN and TELEGRAM_CHAT:
                     enviar_telegram(mensaje)
                 return jsonify({
                     'mensaje': 'No hay juegos NBA disponibles',
+                    'temporada': 'Fuera de temporada (Agosto)',
                     'tipo': 'sin_datos'
                 })
             
@@ -264,7 +256,7 @@ def get_mlb():
             
             datos = {
                 'partido': f"{game['away_team']} @ {game['home_team']}",
-                'liga': 'NBA',
+                'liga': '🏀 NBA',
                 'fecha': fecha_juego.strftime('%d/%m/%Y'),
                 'hora': fecha_juego.strftime('%H:%M'),
                 'tipo': 'juego'
