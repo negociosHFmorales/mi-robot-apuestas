@@ -3,337 +3,295 @@ import requests
 import json
 from datetime import datetime
 import os
+import logging
 
 app = Flask(__name__)
 
+# Configuración de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# CONFIGURACIÓN CRÍTICA - USAR EL PUERTO CORRECTO
+PORT = int(os.environ.get('PORT', 10000))
+
+# Variables de entorno CONSISTENTES
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_CHAT = os.getenv('TELEGRAM_CHAT')
+ODDS_API_KEY = os.getenv('ODDS_API_KEY', '187f072e0b43d7193c8e2c63fc612e9a')
+
 # Archivo para guardar historial
-HISTORIAL_FILE = 'historial_apuestas.json'
+HISTORIAL_FILE = '/tmp/historial_apuestas.json'
 
 @app.route('/')
 def home():
-    """Página principal del robot"""
+    """Página principal - VERIFICACIÓN DE ESTADO"""
     return jsonify({
-        'robot': '🤖 SISTEMA DE APUESTAS V3.0',
-        'estado': '✅ FUNCIONANDO PERFECTAMENTE',
+        'robot': '🤖 SISTEMA APUESTAS V4.0 FUNCIONANDO',
+        'estado': '✅ ONLINE EN RENDER',
         'hora': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
-        'servidor': 'Render.com',
-        'version': '3.0-STABLE',
-        'telegram_configurado': '✅' if os.getenv('TELEGRAM_TOKEN') else '❌',
-        'rutas': {
-            '/health': 'Estado del sistema',
-            '/test-telegram': 'Probar Telegram AHORA',
-            '/webhook': 'Recibir datos de N8N',
-            '/historial': 'Ver análisis guardados',
+        'puerto': PORT,
+        'telegram': '✅ LISTO' if (TELEGRAM_TOKEN and TELEGRAM_CHAT) else '❌ FALTA CONFIG',
+        'rutas_disponibles': {
+            '/': 'Estado actual',
+            '/health': 'Health check Render',
+            '/test-telegram': 'PROBAR TELEGRAM AHORA',
+            '/webhook': 'Recibir de N8N',
+            '/nba': 'Obtener cuotas NBA',
             '/manual': 'Envío manual de prueba'
         }
     })
 
 @app.route('/health')
 def health():
-    """Estado detallado del sistema"""
-    token_ok = bool(os.getenv('TELEGRAM_TOKEN'))
-    chat_ok = bool(os.getenv('TELEGRAM_CHAT'))
-    
+    """Health check para Render - CRÍTICO PARA QUE NO SE APAGUE"""
     return jsonify({
-        'status': '🟢 ONLINE',
-        'timestamp': datetime.now().isoformat(),
-        'servidor': 'Render Cloud',
-        'telegram': {
-            'token_configurado': '✅ SÍ' if token_ok else '❌ NO',
-            'chat_configurado': '✅ SÍ' if chat_ok else '❌ NO',
-            'listo_para_enviar': '🟢 SÍ' if (token_ok and chat_ok) else '🔴 NO'
-        },
-        'archivos': {
-            'historial_existe': '✅' if os.path.exists(HISTORIAL_FILE) else '⚪ Nuevo'
-        },
-        'memoria': '✅ OK',
-        'conexion': '✅ OK'
-    })
+        'status': 'healthy',
+        'port': PORT,
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
 
 @app.route('/test-telegram')
 def test_telegram():
-    """🧪 PROBAR TELEGRAM INMEDIATAMENTE"""
+    """PROBAR TELEGRAM INMEDIATAMENTE"""
     try:
-        token = os.getenv('TELEGRAM_TOKEN')
-        chat = os.getenv('TELEGRAM_CHAT')
-        
-        if not token:
+        if not TELEGRAM_TOKEN:
             return jsonify({
-                'status': '❌ ERROR',
-                'problema': 'TELEGRAM_TOKEN no configurado en Render',
-                'solucion': 'Ve a Environment en Render y agrega TELEGRAM_TOKEN'
-            })
+                'error': '❌ TELEGRAM_TOKEN no está en Render',
+                'solucion': 'Ve a Render > Environment > Agregar TELEGRAM_TOKEN'
+            }), 400
         
-        if not chat:
+        if not TELEGRAM_CHAT:
             return jsonify({
-                'status': '❌ ERROR', 
-                'problema': 'TELEGRAM_CHAT no configurado en Render',
-                'solucion': 'Ve a Environment en Render y agrega TELEGRAM_CHAT'
-            })
+                'error': '❌ TELEGRAM_CHAT no está en Render',
+                'solucion': 'Ve a Render > Environment > Agregar TELEGRAM_CHAT'
+            }), 400
 
-        # Mensaje de prueba
-        mensaje = f"""🧪 PRUEBA EXITOSA - SISTEMA FUNCIONANDO
+        mensaje = f"""🎉 SISTEMA FUNCIONANDO PERFECTAMENTE
 
-🤖 Robot: ✅ Activo
-⏰ Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+🤖 Robot Apuestas: ✅ ACTIVO
+⏰ Hora: {datetime.now().strftime('%H:%M:%S')}
 🌐 Servidor: Render.com
-📡 Conexión: Perfecta
+📡 Puerto: {PORT}
 
-🎯 PRÓXIMOS PASOS:
-1. Ejecutar flujo N8N
-2. Recibir análisis automáticos
-3. ¡Listo para apostar!
+✅ Listo para recibir apuestas de N8N
+✅ Telegram conectado correctamente
 
-✅ Sistema 100% operativo"""
+🎯 PRÓXIMO PASO: Ejecutar flujo N8N"""
 
-        # Enviar a Telegram
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = {
-            'chat_id': chat,
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        response = requests.post(url, json={
+            'chat_id': TELEGRAM_CHAT,
             'text': mensaje,
             'parse_mode': 'HTML'
-        }
-        
-        response = requests.post(url, json=data, timeout=10)
+        })
         
         if response.status_code == 200:
             return jsonify({
-                'status': '🎉 ÉXITO TOTAL',
-                'mensaje': '✅ Telegram funcionando perfectamente',
-                'enviado_a': f'Chat ID: {chat}',
-                'codigo': response.status_code,
-                'siguiente_paso': 'Ejecutar flujo N8N para recibir análisis reales'
+                'status': '✅ ÉXITO TOTAL',
+                'mensaje': 'Telegram funcionando perfectamente',
+                'revisa_telegram': 'Deberías ver el mensaje en tu chat'
             })
         else:
             return jsonify({
-                'status': '⚠️ PROBLEMA',
-                'error': f'Código HTTP: {response.status_code}',
-                'respuesta': response.text[:200],
-                'posible_causa': 'Chat ID incorrecto o bot bloqueado'
-            })
+                'error': f'Error Telegram: {response.status_code}',
+                'detalle': response.text
+            }), 400
             
     except Exception as e:
-        return jsonify({
-            'status': '💥 ERROR TÉCNICO',
-            'error': str(e),
-            'solucion': 'Verificar variables de entorno en Render'
-        })
+        logger.error(f"Error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """📨 RECIBIR ANÁLISIS DESDE N8N"""
+    """RECIBIR DATOS DE N8N"""
     try:
         datos = request.get_json()
-        print(f"📥 N8N ENVIADO: {datos}")
+        logger.info(f"Datos recibidos de N8N: {datos}")
         
-        # Crear registro detallado
-        registro = {
-            'id': f"bet_{int(datetime.now().timestamp())}",
-            'timestamp': datetime.now().isoformat(),
-            'fecha_analisis': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
-            'partido': datos.get('partido', '❓ Sin datos'),
-            'liga': datos.get('liga', 'Liga Desconocida'),
-            'fecha_partido': datos.get('fecha', 'Sin fecha'),
-            'hora_partido': datos.get('hora', 'Sin hora'),
-            'cuotas': {
-                'local': datos.get('cuotaLocal', 'N/A'),
-                'visitante': datos.get('cuotaVisitante', 'N/A'), 
-                'empate': datos.get('cuotaEmpate', 'N/A')
-            },
-            'analisis': {
-                'recomendacion': datos.get('recomendacion', '❓ Sin análisis'),
-                'confianza': datos.get('confianza', '0%'),
-                'apostar': datos.get('apostar', '0%'),
-                'valor': datos.get('valor', 'NO'),
-                'casa': datos.get('casa', 'Desconocida')
-            },
-            'origen': 'N8N-Robot',
-            'estado': 'procesado'
-        }
+        # Procesar datos de N8N
+        if datos.get('tipo') == 'juego':
+            mensaje = format_game_message(datos)
+        else:
+            mensaje = datos.get('mensaje', 'Sin datos')
+        
+        # Enviar a Telegram si está configurado
+        if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+            enviar_telegram(mensaje)
         
         # Guardar en historial
-        historial = cargar_historial()
-        historial.append(registro)
-        historial = historial[-100:]  # Últimos 100
-        guardar_historial(historial)
-        
-        # ENVIAR SIEMPRE A TELEGRAM
-        resultado_telegram = enviar_telegram_analisis(registro)
+        guardar_historial(datos)
         
         return jsonify({
-            'status': '🎉 PROCESADO EXITOSAMENTE',
-            'registro_id': registro['id'],
-            'partido': registro['partido'],
-            'telegram': resultado_telegram,
-            'guardado': '✅ SÍ',
-            'total_historial': len(historial),
-            'timestamp': registro['timestamp']
+            'status': 'success',
+            'processed': True,
+            'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
-        print(f"💥 ERROR WEBHOOK: {e}")
-        return jsonify({
-            'status': '💥 ERROR',
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        }), 500
+        logger.error(f"Error webhook: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/nba')
+def get_nba():
+    """Obtener cuotas NBA directamente"""
+    try:
+        if not ODDS_API_KEY:
+            return jsonify({'error': 'API key no configurada'}), 400
+            
+        url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+        params = {
+            'apiKey': ODDS_API_KEY,
+            'regions': 'us',
+            'markets': 'h2h'
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            games = response.json()
+            
+            if not games:
+                return jsonify({
+                    'mensaje': 'No hay juegos NBA disponibles',
+                    'tipo': 'sin_datos'
+                })
+            
+            # Formatear primer juego
+            game = games[0]
+            resultado = {
+                'partido': f"{game['away_team']} @ {game['home_team']}",
+                'fecha': datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).strftime('%d/%m %H:%M'),
+                'tipo': 'juego'
+            }
+            
+            # Agregar cuotas si existen
+            if game.get('bookmakers'):
+                bookmaker = game['bookmakers'][0]
+                market = next((m for m in bookmaker['markets'] if m['key'] == 'h2h'), None)
+                if market:
+                    for outcome in market['outcomes']:
+                        if outcome['name'] == game['home_team']:
+                            resultado['cuotaLocal'] = outcome['price']
+                        elif outcome['name'] == game['away_team']:
+                            resultado['cuotaVisitante'] = outcome['price']
+                    resultado['casa'] = bookmaker['title']
+            
+            # Enviar a Telegram si está configurado
+            if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+                mensaje = format_game_message(resultado)
+                enviar_telegram(mensaje)
+            
+            return jsonify(resultado)
+            
+        else:
+            return jsonify({
+                'error': f'Error API: {response.status_code}',
+                'mensaje': 'No se pudieron obtener las cuotas'
+            }), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error NBA: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/manual')
 def manual():
-    """🎯 ENVÍO MANUAL DE PRUEBA"""
-    # Datos de ejemplo
-    registro_prueba = {
-        'id': f"manual_{int(datetime.now().timestamp())}",
-        'timestamp': datetime.now().isoformat(),
-        'fecha_analisis': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
-        'partido': 'REAL MADRID vs BARCELONA',
-        'liga': 'La Liga - PRUEBA MANUAL',
-        'fecha_partido': datetime.now().strftime('%d/%m/%Y'),
-        'hora_partido': '21:00',
-        'cuotas': {
-            'local': '2.10',
-            'visitante': '3.40',
-            'empate': '3.20'
-        },
-        'analisis': {
-            'recomendacion': '🏠 REAL MADRID FAVORITO',
-            'confianza': '75%',
-            'apostar': '3%',
-            'valor': 'SÍ',
-            'casa': 'Bet365'
-        },
-        'origen': 'MANUAL-TEST',
-        'estado': 'enviado'
-    }
-    
-    # Enviar a Telegram
-    resultado = enviar_telegram_analisis(registro_prueba)
-    
-    # Guardar en historial
-    historial = cargar_historial()
-    historial.append(registro_prueba)
-    guardar_historial(historial)
-    
-    return jsonify({
-        'status': '📨 ENVIADO MANUALMENTE',
-        'telegram': resultado,
-        'datos_enviados': registro_prueba,
-        'uso': 'Para probar que todo funciona correctamente'
-    })
-
-@app.route('/historial')
-def historial():
-    """📊 VER HISTORIAL COMPLETO"""
+    """Envío manual de prueba"""
     try:
-        historial = cargar_historial()
-        total = len(historial)
-        
-        if total == 0:
-            return jsonify({
-                'mensaje': '📭 Sin análisis aún',
-                'total': 0,
-                'sugerencia': 'Ejecuta el flujo N8N o usa /manual para enviar pruebas'
-            })
-        
-        # Estadísticas
-        con_valor = sum(1 for h in historial if h.get('analisis', {}).get('valor') == 'SÍ')
-        manuales = sum(1 for h in historial if 'MANUAL' in h.get('origen', ''))
-        
-        return jsonify({
-            'resumen': {
-                'total_analisis': total,
-                'con_valor': con_valor,
-                'sin_valor': total - con_valor,
-                'porcentaje_valor': f"{(con_valor/total*100):.1f}%",
-                'envios_manuales': manuales,
-                'desde_n8n': total - manuales
-            },
-            'ultimos_5': historial[-5:],
-            'primer_analisis': historial[0]['fecha_analisis'] if historial else None,
-            'ultimo_analisis': historial[-1]['fecha_analisis'] if historial else None
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'error': f'Error cargando historial: {str(e)}'
-        })
-
-def cargar_historial():
-    """Cargar historial desde archivo"""
-    try:
-        with open(HISTORIAL_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-def guardar_historial(historial):
-    """Guardar historial en archivo"""
-    try:
-        with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
-            json.dump(historial, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error guardando historial: {e}")
-
-def enviar_telegram_analisis(registro):
-    """📱 ENVIAR ANÁLISIS FORMATEADO A TELEGRAM"""
-    try:
-        token = os.getenv('TELEGRAM_TOKEN')
-        chat = os.getenv('TELEGRAM_CHAT')
-        
-        if not token or not chat:
-            return "❌ Telegram no configurado"
-        
-        # Crear mensaje súper detallado
-        cuotas = registro.get('cuotas', {})
-        analisis = registro.get('analisis', {})
-        
-        mensaje = f"""🚨 ANÁLISIS DE APUESTA DETECTADO 🚨
-
-⚽ **{registro.get('partido', 'Partido desconocido')}**
-🏆 {registro.get('liga', 'Liga desconocida')}
-📅 {registro.get('fecha_partido', 'Sin fecha')} a las {registro.get('hora_partido', 'Sin hora')}
-
-💰 **CUOTAS ACTUALES:**
-🏠 Local: **{cuotas.get('local', 'N/A')}**
-✈️ Visitante: **{cuotas.get('visitante', 'N/A')}**
-🤝 Empate: **{cuotas.get('empate', 'N/A')}**
-
-🎯 **ANÁLISIS COMPLETO:**
-💡 Recomendación: **{analisis.get('recomendacion', 'Sin recomendación')}**
-📊 Confianza: **{analisis.get('confianza', '0%')}**
-💎 Apostar: **{analisis.get('apostar', '0%')}** del bankroll
-✅ Valor detectado: **{analisis.get('valor', 'NO')}**
-🏪 Casa de apuestas: **{analisis.get('casa', 'N/A')}**
-
-⏰ Análisis realizado: {registro.get('fecha_analisis', 'Sin fecha')}
-🤖 Origen: {registro.get('origen', 'Sistema')}
-
-⚠️ **¡APUESTA CON RESPONSABILIDAD!**"""
-
-        # Enviar mensaje
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = {
-            'chat_id': chat,
-            'text': mensaje,
-            'parse_mode': 'Markdown'
+        datos_prueba = {
+            'partido': 'Lakers @ Warriors',
+            'fecha': datetime.now().strftime('%d/%m %H:%M'),
+            'cuotaLocal': '2.10',
+            'cuotaVisitante': '1.75',
+            'casa': 'Bet365',
+            'tipo': 'juego'
         }
         
-        response = requests.post(url, json=data, timeout=10)
+        mensaje = format_game_message(datos_prueba)
         
-        if response.status_code == 200:
-            return "✅ Enviado correctamente"
+        if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+            resultado = enviar_telegram(mensaje)
+            return jsonify({
+                'status': 'Enviado',
+                'telegram': resultado,
+                'datos': datos_prueba
+            })
         else:
-            return f"⚠️ Error: {response.status_code}"
+            return jsonify({
+                'error': 'Telegram no configurado',
+                'datos': datos_prueba
+            })
             
     except Exception as e:
-        return f"💥 Error técnico: {str(e)}"
+        return jsonify({'error': str(e)}), 500
+
+def format_game_message(datos):
+    """Formatear mensaje para Telegram"""
+    mensaje = f"""🏀 **NBA HOY**
+
+⚡ {datos.get('partido', 'Sin partido')}
+📅 {datos.get('fecha', 'Sin fecha')}
+
+💰 **Cuotas:**
+• Local: {datos.get('cuotaLocal', 'N/A')}
+• Visitante: {datos.get('cuotaVisitante', 'N/A')}
+
+🏢 Casa: {datos.get('casa', 'Sistema')}
+⏰ Actualizado: {datetime.now().strftime('%H:%M')}"""
+    
+    return mensaje
+
+def enviar_telegram(mensaje):
+    """Enviar mensaje a Telegram"""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        response = requests.post(url, json={
+            'chat_id': TELEGRAM_CHAT,
+            'text': mensaje,
+            'parse_mode': 'Markdown'
+        })
+        
+        if response.status_code == 200:
+            return "✅ Enviado"
+        else:
+            return f"Error: {response.status_code}"
+            
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def guardar_historial(datos):
+    """Guardar en historial temporal"""
+    try:
+        # Cargar historial existente
+        try:
+            with open(HISTORIAL_FILE, 'r') as f:
+                historial = json.load(f)
+        except:
+            historial = []
+        
+        # Agregar nuevo registro
+        historial.append({
+            'timestamp': datetime.now().isoformat(),
+            'datos': datos
+        })
+        
+        # Mantener solo últimos 100
+        historial = historial[-100:]
+        
+        # Guardar
+        with open(HISTORIAL_FILE, 'w') as f:
+            json.dump(historial, f)
+            
+    except Exception as e:
+        logger.error(f"Error guardando historial: {e}")
 
 if __name__ == '__main__':
-    print("🚀 INICIANDO SISTEMA DE APUESTAS V3.0")
-    print("📡 Render.com deployment")
-    print("🤖 Robot listo para funcionar")
+    print(f"🚀 INICIANDO EN PUERTO {PORT}")
+    print(f"📡 Telegram: {'✅ Configurado' if TELEGRAM_TOKEN else '❌ Falta configurar'}")
+    print(f"🌐 Servidor: Render.com")
+    
+    # CRÍTICO: Usar el puerto correcto
     app.run(
-        host='0.0.0.0', 
-        port=int(os.environ.get('PORT', 5000)), 
+        host='0.0.0.0',
+        port=PORT,
         debug=False
     )
