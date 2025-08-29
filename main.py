@@ -35,9 +35,11 @@ def home():
             '/': 'Estado actual',
             '/health': 'Health check Render',
             '/test-telegram': 'PROBAR TELEGRAM AHORA',
+            '/test-webhook': 'SIMULAR WEBHOOK N8N',
             '/webhook': 'Recibir de N8N',
             '/nba': 'Obtener cuotas NBA',
-            '/manual': 'Envío manual de prueba'
+            '/manual': 'Envío manual de prueba',
+            '/historial': 'Ver últimos análisis'
         }
     })
 
@@ -101,6 +103,72 @@ def test_telegram():
         logger.error(f"Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/test-webhook', methods=['GET', 'POST'])
+def test_webhook():
+    """Simular webhook de N8N para pruebas"""
+    try:
+        # Simular exactamente lo que N8N enviaría
+        datos_simulados = {
+            'partido': 'Boston Celtics @ Miami Heat',
+            'liga': 'NBA - Temporada Regular',
+            'fecha': datetime.now().strftime('%d/%m/%Y'),
+            'hora': '20:30',
+            'cuotaLocal': '1.85',
+            'cuotaVisitante': '2.05',
+            'cuotaEmpate': 'N/A',
+            'recomendacion': '🏠 Miami Heat ligero favorito',
+            'confianza': '65%',
+            'apostar': '1.5%',
+            'valor': 'POSIBLE',
+            'casa': 'DraftKings'
+        }
+        
+        # Crear el mismo mensaje que el webhook real
+        mensaje = f"""🚨 ANÁLISIS DE APUESTA DETECTADO 🚨
+
+⚽ {datos_simulados.get('partido')}
+🏆 {datos_simulados.get('liga')}
+📅 {datos_simulados.get('fecha')} a las {datos_simulados.get('hora')}
+
+💰 **CUOTAS ACTUALES:**
+🏠 Local: {datos_simulados.get('cuotaLocal')}
+✈️ Visitante: {datos_simulados.get('cuotaVisitante')}
+🤝 Empate: {datos_simulados.get('cuotaEmpate')}
+
+🎯 **ANÁLISIS COMPLETO:**
+💡 Recomendación: {datos_simulados.get('recomendacion')}
+📊 Confianza: {datos_simulados.get('confianza')}
+💎 Apostar: {datos_simulados.get('apostar')} del bankroll
+✅ Valor detectado: {datos_simulados.get('valor')}
+🏪 Casa de apuestas: {datos_simulados.get('casa')}
+
+⏰ Análisis realizado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+🤖 Origen: TEST-WEBHOOK
+
+⚠️ ¡APUESTA CON RESPONSABILIDAD!"""
+        
+        # Enviar a Telegram
+        if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+            resultado = enviar_telegram(mensaje)
+            guardar_historial(datos_simulados)
+            
+            return jsonify({
+                'status': '✅ TEST EXITOSO',
+                'mensaje': 'Webhook simulado correctamente',
+                'telegram': resultado,
+                'revisa': 'Mira tu Telegram ahora',
+                'datos_enviados': datos_simulados
+            })
+        else:
+            return jsonify({
+                'error': 'Telegram no configurado',
+                'datos_simulados': datos_simulados
+            })
+            
+    except Exception as e:
+        logger.error(f"Error test webhook: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """RECIBIR DATOS DE N8N"""
@@ -108,15 +176,34 @@ def webhook():
         datos = request.get_json()
         logger.info(f"Datos recibidos de N8N: {datos}")
         
-        # Procesar datos de N8N
-        if datos.get('tipo') == 'juego':
-            mensaje = format_game_message(datos)
-        else:
-            mensaje = datos.get('mensaje', 'Sin datos')
+        # Crear mensaje formateado para análisis completo
+        mensaje = f"""🚨 ANÁLISIS DE APUESTA DETECTADO 🚨
+
+⚽ {datos.get('partido', '❓ Sin datos')}
+🏆 {datos.get('liga', 'Liga Desconocida')}
+📅 {datos.get('fecha', 'Sin fecha')} a las {datos.get('hora', 'Sin hora')}
+
+💰 **CUOTAS ACTUALES:**
+🏠 Local: {datos.get('cuotaLocal', 'N/A')}
+✈️ Visitante: {datos.get('cuotaVisitante', 'N/A')}
+🤝 Empate: {datos.get('cuotaEmpate', 'N/A')}
+
+🎯 **ANÁLISIS COMPLETO:**
+💡 Recomendación: {datos.get('recomendacion', '❓ Sin análisis')}
+📊 Confianza: {datos.get('confianza', '0%')}
+💎 Apostar: {datos.get('apostar', '0%')} del bankroll
+✅ Valor detectado: {datos.get('valor', 'NO')}
+🏪 Casa de apuestas: {datos.get('casa', 'Desconocida')}
+
+⏰ Análisis realizado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+🤖 Origen: N8N-Robot
+
+⚠️ ¡APUESTA CON RESPONSABILIDAD!"""
         
-        # Enviar a Telegram si está configurado
+        # Enviar a Telegram
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
-            enviar_telegram(mensaje)
+            resultado = enviar_telegram(mensaje)
+            logger.info(f"Telegram resultado: {resultado}")
         
         # Guardar en historial
         guardar_historial(datos)
@@ -124,6 +211,8 @@ def webhook():
         return jsonify({
             'status': 'success',
             'processed': True,
+            'telegram_sent': True,
+            'data_received': datos,
             'timestamp': datetime.now().isoformat()
         })
         
@@ -151,6 +240,9 @@ def get_nba():
             games = response.json()
             
             if not games:
+                mensaje = "❌ No hay juegos NBA disponibles en este momento"
+                if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+                    enviar_telegram(mensaje)
                 return jsonify({
                     'mensaje': 'No hay juegos NBA disponibles',
                     'tipo': 'sin_datos'
@@ -158,9 +250,13 @@ def get_nba():
             
             # Formatear primer juego
             game = games[0]
-            resultado = {
+            fecha_juego = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00'))
+            
+            datos = {
                 'partido': f"{game['away_team']} @ {game['home_team']}",
-                'fecha': datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).strftime('%d/%m %H:%M'),
+                'liga': 'NBA',
+                'fecha': fecha_juego.strftime('%d/%m/%Y'),
+                'hora': fecha_juego.strftime('%H:%M'),
                 'tipo': 'juego'
             }
             
@@ -171,17 +267,28 @@ def get_nba():
                 if market:
                     for outcome in market['outcomes']:
                         if outcome['name'] == game['home_team']:
-                            resultado['cuotaLocal'] = outcome['price']
+                            datos['cuotaLocal'] = str(outcome['price'])
                         elif outcome['name'] == game['away_team']:
-                            resultado['cuotaVisitante'] = outcome['price']
-                    resultado['casa'] = bookmaker['title']
+                            datos['cuotaVisitante'] = str(outcome['price'])
+                    datos['casa'] = bookmaker['title']
             
-            # Enviar a Telegram si está configurado
+            # Crear mensaje y enviar
+            mensaje = f"""🏀 **NBA - CUOTAS EN VIVO**
+
+⚡ {datos.get('partido')}
+📅 {datos.get('fecha')} a las {datos.get('hora')}
+
+💰 **Cuotas:**
+🏠 Local: {datos.get('cuotaLocal', 'N/A')}
+✈️ Visitante: {datos.get('cuotaVisitante', 'N/A')}
+
+🏪 Casa: {datos.get('casa', 'Sistema')}
+⏰ Actualizado: {datetime.now().strftime('%H:%M')}"""
+            
             if TELEGRAM_TOKEN and TELEGRAM_CHAT:
-                mensaje = format_game_message(resultado)
                 enviar_telegram(mensaje)
             
-            return jsonify(resultado)
+            return jsonify(datos)
             
         else:
             return jsonify({
@@ -195,50 +302,92 @@ def get_nba():
 
 @app.route('/manual')
 def manual():
-    """Envío manual de prueba"""
+    """Envío manual de prueba con datos completos"""
     try:
+        # Simular datos exactos que enviaría N8N
         datos_prueba = {
-            'partido': 'Lakers @ Warriors',
-            'fecha': datetime.now().strftime('%d/%m %H:%M'),
+            'partido': 'Los Angeles Lakers @ Golden State Warriors',
+            'liga': 'NBA - Temporada Regular',
+            'fecha': datetime.now().strftime('%d/%m/%Y'),
+            'hora': '21:00',
             'cuotaLocal': '2.10',
             'cuotaVisitante': '1.75',
-            'casa': 'Bet365',
-            'tipo': 'juego'
+            'cuotaEmpate': 'N/A',
+            'recomendacion': '✈️ Lakers FAVORITO CLARO',
+            'confianza': '75%',
+            'apostar': '2%',
+            'valor': 'SÍ',
+            'casa': 'Bet365'
         }
         
-        mensaje = format_game_message(datos_prueba)
+        # Usar el mismo formato que el webhook
+        mensaje = f"""🚨 ANÁLISIS DE APUESTA DETECTADO 🚨
+
+⚽ {datos_prueba.get('partido')}
+🏆 {datos_prueba.get('liga')}
+📅 {datos_prueba.get('fecha')} a las {datos_prueba.get('hora')}
+
+💰 **CUOTAS ACTUALES:**
+🏠 Local: {datos_prueba.get('cuotaLocal')}
+✈️ Visitante: {datos_prueba.get('cuotaVisitante')}
+🤝 Empate: {datos_prueba.get('cuotaEmpate')}
+
+🎯 **ANÁLISIS COMPLETO:**
+💡 Recomendación: {datos_prueba.get('recomendacion')}
+📊 Confianza: {datos_prueba.get('confianza')}
+💎 Apostar: {datos_prueba.get('apostar')} del bankroll
+✅ Valor detectado: {datos_prueba.get('valor')}
+🏪 Casa de apuestas: {datos_prueba.get('casa')}
+
+⏰ Análisis realizado: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+🤖 Origen: PRUEBA-MANUAL
+
+⚠️ ¡APUESTA CON RESPONSABILIDAD!"""
         
         if TELEGRAM_TOKEN and TELEGRAM_CHAT:
             resultado = enviar_telegram(mensaje)
+            guardar_historial(datos_prueba)
             return jsonify({
-                'status': 'Enviado',
+                'status': '✅ ENVIADO CORRECTAMENTE',
                 'telegram': resultado,
-                'datos': datos_prueba
+                'mensaje': 'Revisa tu Telegram, deberías ver el análisis completo',
+                'datos_enviados': datos_prueba
             })
         else:
             return jsonify({
                 'error': 'Telegram no configurado',
-                'datos': datos_prueba
+                'solucion': 'Configura TELEGRAM_TOKEN y TELEGRAM_CHAT en Render'
             })
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def format_game_message(datos):
-    """Formatear mensaje para Telegram"""
-    mensaje = f"""🏀 **NBA HOY**
-
-⚡ {datos.get('partido', 'Sin partido')}
-📅 {datos.get('fecha', 'Sin fecha')}
-
-💰 **Cuotas:**
-• Local: {datos.get('cuotaLocal', 'N/A')}
-• Visitante: {datos.get('cuotaVisitante', 'N/A')}
-
-🏢 Casa: {datos.get('casa', 'Sistema')}
-⏰ Actualizado: {datetime.now().strftime('%H:%M')}"""
-    
-    return mensaje
+@app.route('/historial')
+def historial():
+    """Ver historial de análisis"""
+    try:
+        # Cargar historial
+        try:
+            with open(HISTORIAL_FILE, 'r') as f:
+                historial = json.load(f)
+        except:
+            historial = []
+        
+        if not historial:
+            return jsonify({
+                'mensaje': 'No hay análisis guardados todavía',
+                'total': 0
+            })
+        
+        # Devolver últimos 10
+        return jsonify({
+            'total': len(historial),
+            'ultimos_10': historial[-10:],
+            'mensaje': f'Mostrando últimos {min(10, len(historial))} análisis'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def enviar_telegram(mensaje):
     """Enviar mensaje a Telegram"""
@@ -248,10 +397,10 @@ def enviar_telegram(mensaje):
             'chat_id': TELEGRAM_CHAT,
             'text': mensaje,
             'parse_mode': 'Markdown'
-        })
+        }, timeout=10)
         
         if response.status_code == 200:
-            return "✅ Enviado"
+            return "✅ Enviado correctamente"
         else:
             return f"Error: {response.status_code}"
             
@@ -269,17 +418,19 @@ def guardar_historial(datos):
             historial = []
         
         # Agregar nuevo registro
-        historial.append({
+        registro = {
             'timestamp': datetime.now().isoformat(),
+            'fecha': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
             'datos': datos
-        })
+        }
+        historial.append(registro)
         
         # Mantener solo últimos 100
         historial = historial[-100:]
         
         # Guardar
         with open(HISTORIAL_FILE, 'w') as f:
-            json.dump(historial, f)
+            json.dump(historial, f, indent=2)
             
     except Exception as e:
         logger.error(f"Error guardando historial: {e}")
@@ -288,6 +439,14 @@ if __name__ == '__main__':
     print(f"🚀 INICIANDO EN PUERTO {PORT}")
     print(f"📡 Telegram: {'✅ Configurado' if TELEGRAM_TOKEN else '❌ Falta configurar'}")
     print(f"🌐 Servidor: Render.com")
+    print("📋 Rutas disponibles:")
+    print("  - / : Estado del sistema")
+    print("  - /test-telegram : Probar Telegram")
+    print("  - /test-webhook : Simular webhook")
+    print("  - /manual : Envío manual")
+    print("  - /nba : Cuotas NBA en vivo")
+    print("  - /webhook : Recibir de N8N")
+    print("  - /historial : Ver últimos análisis")
     
     # CRÍTICO: Usar el puerto correcto
     app.run(
