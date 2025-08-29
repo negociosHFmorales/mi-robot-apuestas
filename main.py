@@ -37,7 +37,8 @@ def home():
             '/test-telegram': 'PROBAR TELEGRAM AHORA',
             '/test-webhook': 'SIMULAR WEBHOOK N8N',
             '/webhook': 'Recibir de N8N',
-            '/nba': 'Obtener cuotas NBA',
+            '/nba': 'Cuotas NBA (fuera temporada)',
+            '/mlb': 'Cuotas MLB ⚾ (ACTIVO AHORA)',
             '/manual': 'Envío manual de prueba',
             '/historial': 'Ver últimos análisis'
         }
@@ -228,6 +229,15 @@ def get_nba():
             return jsonify({'error': 'API key no configurada'}), 400
             
         url = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+
+@app.route('/mlb')
+def get_mlb():
+    """Obtener cuotas MLB (Béisbol) - ACTIVO EN AGOSTO"""
+    try:
+        if not ODDS_API_KEY:
+            return jsonify({'error': 'API key no configurada'}), 400
+            
+        url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
         params = {
             'apiKey': ODDS_API_KEY,
             'regions': 'us',
@@ -298,6 +308,88 @@ def get_nba():
             
     except Exception as e:
         logger.error(f"Error NBA: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/mlb')
+def get_mlb():
+    """Obtener cuotas MLB (Béisbol) - ACTIVO EN AGOSTO"""
+    try:
+        if not ODDS_API_KEY:
+            return jsonify({'error': 'API key no configurada'}), 400
+            
+        url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
+        params = {
+            'apiKey': ODDS_API_KEY,
+            'regions': 'us',
+            'markets': 'h2h'
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            games = response.json()
+            
+            if not games:
+                mensaje = "❌ No hay juegos MLB disponibles en este momento"
+                if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+                    enviar_telegram(mensaje)
+                return jsonify({
+                    'mensaje': 'No hay juegos MLB disponibles',
+                    'tipo': 'sin_datos'
+                })
+            
+            # Formatear primer juego
+            game = games[0]
+            fecha_juego = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00'))
+            
+            datos = {
+                'partido': f"{game['away_team']} @ {game['home_team']}",
+                'liga': '⚾ MLB - Béisbol',
+                'fecha': fecha_juego.strftime('%d/%m/%Y'),
+                'hora': fecha_juego.strftime('%H:%M'),
+                'tipo': 'juego'
+            }
+            
+            # Agregar cuotas si existen
+            if game.get('bookmakers'):
+                bookmaker = game['bookmakers'][0]
+                market = next((m for m in bookmaker['markets'] if m['key'] == 'h2h'), None)
+                if market:
+                    for outcome in market['outcomes']:
+                        if outcome['name'] == game['home_team']:
+                            datos['cuotaLocal'] = str(outcome['price'])
+                        elif outcome['name'] == game['away_team']:
+                            datos['cuotaVisitante'] = str(outcome['price'])
+                    datos['casa'] = bookmaker['title']
+            
+            # Crear mensaje y enviar
+            mensaje = f"""⚾ **MLB - BÉISBOL EN VIVO**
+
+⚡ {datos.get('partido')}
+📅 {datos.get('fecha')} a las {datos.get('hora')}
+
+💰 **Cuotas:**
+🏠 Local: {datos.get('cuotaLocal', 'N/A')}
+✈️ Visitante: {datos.get('cuotaVisitante', 'N/A')}
+
+🏪 Casa: {datos.get('casa', 'Sistema')}
+⏰ Actualizado: {datetime.now().strftime('%H:%M')}
+
+⚾ MLB está ACTIVO en agosto!"""
+            
+            if TELEGRAM_TOKEN and TELEGRAM_CHAT:
+                enviar_telegram(mensaje)
+            
+            return jsonify(datos)
+            
+        else:
+            return jsonify({
+                'error': f'Error API: {response.status_code}',
+                'mensaje': 'No se pudieron obtener las cuotas'
+            }), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error MLB: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/manual')
@@ -444,7 +536,8 @@ if __name__ == '__main__':
     print("  - /test-telegram : Probar Telegram")
     print("  - /test-webhook : Simular webhook")
     print("  - /manual : Envío manual")
-    print("  - /nba : Cuotas NBA en vivo")
+    print("  - /nba : Cuotas NBA (Oct-Jun)")
+    print("  - /mlb : Cuotas MLB béisbol (Abr-Oct)")
     print("  - /webhook : Recibir de N8N")
     print("  - /historial : Ver últimos análisis")
     
